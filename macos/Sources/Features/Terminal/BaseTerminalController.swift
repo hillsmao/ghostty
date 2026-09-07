@@ -816,7 +816,7 @@ class BaseTerminalController: NSWindowController,
            surfaceTree.contains(titleSurface) {
             // If we have a surface, we want to listen for title changes.
             titleSurface.$title
-                .combineLatest(titleSurface.$bell)
+                .combineLatest(self.$bell)
                 .map { [weak self] in self?.computeTitle(title: $0, bell: $1) ?? "" }
                 .sink { [weak self] in self?.titleDidChange(to: $0) }
                 .store(in: &focusedSurfaceCancellables)
@@ -846,7 +846,7 @@ class BaseTerminalController: NSWindowController,
         if let titleOverride {
             window.title = computeTitle(
                 title: titleOverride,
-                bell: focusedSurface?.bell ?? false)
+                bell: bell)
             return
         }
 
