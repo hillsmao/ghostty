@@ -1,0 +1,76 @@
+name: Luban Build
+
+on:
+  push:
+    branches:
+      - "luban/**"
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      GHOSTTY_VERSION: "1.4.0"
+      ZIG_VERSION: "0.17.0"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          echo "Available Xcode installs:"
+          ls -d /Applications/Xcode*.app || true
+          # 上游 1.4.0 发版用 Xcode_27.1（release-tag.yml）；挑本机最高版本，找不到 27 时在日志里说明
+          x=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sed -E 's#.*/Xcode_([0-9.]+)\.app#\1#' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
+          if [ -n "$x" ]; then
+            sudo xcode-select -s "/Applications/Xcode_${x}.app"
+            echo "Selected Xcode_${x}.app"
+          else
+            echo "No versioned Xcode found, keeping the default toolchain."
+          fi
+          case "$x" in 27*) ;; *) echo "WARNING: upstream 1.4.0 builds with Xcode_27.1; selected '${x}'" ;; esac
+          xcodebuild -version
+
+      - name: Ensure Metal toolchain
+        run: |
+          if ! xcrun metal --version >/dev/null 2>&1; then
+            echo "Metal toolchain missing, downloading..."
+            sudo xcodebuild -downloadComponent MetalToolchain || true
+          fi
+          xcrun metal --version || true
+
+      - name: Install Zig
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o zig.tar.xz \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-aarch64-macos-${ZIG_VERSION}.tar.xz"
+          tar -xf zig.tar.xz
+          echo "$RUNNER_TEMP/zig-aarch64-macos-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Zig version
+        run: zig version
+
+      - name: Build Ghostty.app
+        run: |
+          zig build \
+            -Doptimize=ReleaseFast \
+            -Dversion-string=${GHOSTTY_VERSION} \
+            -Dxcframework-target=native
+
+      - name: Inspect the app bundle
+        run: |
+          ls -la macos/build/ReleaseLocal
+          codesign -dv --verbose=2 macos/build/ReleaseLocal/Ghostty.app 2>&1 || true
+
+      - name: Package
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            macos/build/ReleaseLocal/Ghostty.app Ghostty-luban.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ghostty-luban
+          path: Ghostty-luban.zip
